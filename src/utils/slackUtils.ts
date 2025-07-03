@@ -30,6 +30,9 @@ export async function fetchSlackUsers(): Promise<SlackUser[]> {
   try {
     const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
     
+    console.log('[SLACK] Token available:', !!slackToken);
+    console.log('[SLACK] Token starts with xoxb:', slackToken?.startsWith('xoxb-'));
+    
     if (slackToken && slackToken.startsWith('xoxb-')) {
       console.log('[SLACK] Fetching users from Slack API...');
       
@@ -41,8 +44,12 @@ export async function fetchSlackUsers(): Promise<SlackUser[]> {
         },
       });
       
+      console.log('[SLACK] API Response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log('[SLACK] API Response:', data);
+        
         if (data.ok && data.members) {
           const users = data.members
             .filter((user: any) => 
@@ -63,15 +70,16 @@ export async function fetchSlackUsers(): Promise<SlackUser[]> {
           return users;
         } else {
           console.error('[SLACK] API Error:', data.error);
+          console.log('[SLACK] Full response:', data);
         }
       } else {
-        console.error('[SLACK] HTTP Error:', response.status, response.statusText);
+        const errorText = await response.text();
+        console.error('[SLACK] HTTP Error:', response.status, response.statusText, errorText);
       }
     }
     
     // Fallback to mock data
     console.log('[SLACK] Using mock data - check VITE_SLACK_BOT_TOKEN configuration');
-    await new Promise(resolve => setTimeout(resolve, 300));
     return mockSlackUsers;
     
   } catch (error) {
@@ -88,6 +96,10 @@ export async function sendSlackNotification(
   try {
     const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
     const webhookUrl = import.meta.env.VITE_SLACK_WEBHOOK_URL;
+    
+    console.log('[SLACK] Sending notification to user:', userId);
+    console.log('[SLACK] Bot token available:', !!slackToken);
+    console.log('[SLACK] Webhook available:', !!webhookUrl);
     
     const currentTime = new Date().toLocaleTimeString([], { 
       hour: '2-digit', 
@@ -126,11 +138,13 @@ Please come to reception when convenient. Thank you! 🙏`;
       });
       
       const result = await response.json();
+      console.log('[SLACK] Direct message response:', result);
+      
       if (result.ok) {
-        console.log(`[SLACK] Direct message sent successfully to ${userId}`);
+        console.log(`[SLACK] ✅ Direct message sent successfully to ${userId}`);
         return true;
       } else {
-        console.error('[SLACK] Direct message failed:', result.error);
+        console.error('[SLACK] ❌ Direct message failed:', result.error);
         // Fall through to webhook
       }
     }
@@ -145,17 +159,20 @@ Please come to reception when convenient. Thank you! 🙏`;
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text: message,
+          text: `📢 ${message}`,
           username: 'OttoHello Visitor System',
           icon_emoji: ':wave:',
         }),
       });
       
+      console.log('[SLACK] Webhook response status:', response.status);
+      
       if (response.ok) {
-        console.log('[SLACK] Webhook notification sent successfully');
+        console.log('[SLACK] ✅ Webhook notification sent successfully');
         return true;
       } else {
-        console.error('[SLACK] Webhook failed:', response.status, response.statusText);
+        const errorText = await response.text();
+        console.error('[SLACK] ❌ Webhook failed:', response.status, response.statusText, errorText);
       }
     }
     

@@ -17,6 +17,7 @@ import {
   Users,
   CheckCircle,
   AlertCircle,
+  ChevronDown,
 } from 'lucide-react';
 import Joyride, { CallBackProps, STATUS, Step } from 'react-joyride';
 
@@ -47,6 +48,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
   const [filteredUsers, setFilteredUsers] = useState<Array<{id: string, name: string, real_name: string}>>([]);
   const [showUserSuggestions, setShowUserSuggestions] = useState(false);
   const [slackNotificationStatus, setSlackNotificationStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [loadingSlackUsers, setLoadingSlackUsers] = useState(true);
 
   // Joy-ride (in-app tour)
   const [runTour, setRunTour] = useState(false);
@@ -94,33 +96,43 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
   useEffect(() => {
     const loadSlackUsers = async () => {
       try {
+        setLoadingSlackUsers(true);
+        console.log('[CHECKIN] Loading Slack users...');
         const users = await fetchSlackUsers();
+        console.log('[CHECKIN] Loaded users:', users);
         setSlackUsers(users);
       } catch (error) {
-        console.error('Failed to load Slack users:', error);
+        console.error('[CHECKIN] Failed to load Slack users:', error);
+      } finally {
+        setLoadingSlackUsers(false);
       }
     };
     loadSlackUsers();
   }, []);
 
   const handlePersonToMeetChange = (value: string) => {
+    console.log('[CHECKIN] Person to meet changed:', value);
     setFormData(p => ({ ...p, personToMeet: value }));
     
-    if (value.length > 1) {
+    if (value.length > 0) {
       const filtered = slackUsers.filter(user => 
         user.real_name.toLowerCase().includes(value.toLowerCase()) ||
         user.name.toLowerCase().includes(value.toLowerCase())
       );
+      console.log('[CHECKIN] Filtered users:', filtered);
       setFilteredUsers(filtered);
       setShowUserSuggestions(filtered.length > 0);
     } else {
       setShowUserSuggestions(false);
+      setFilteredUsers([]);
     }
   };
 
   const selectSlackUser = (user: {id: string, name: string, real_name: string}) => {
+    console.log('[CHECKIN] Selected user:', user);
     setFormData(p => ({ ...p, personToMeet: user.real_name }));
     setShowUserSuggestions(false);
+    setFilteredUsers([]);
   };
 
   // Camera helpers
@@ -232,11 +244,14 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
         throw new Error(error?.message || 'Failed to save visitor data');
       }
 
+      console.log('[CHECKIN] Visitor saved to database:', data.id);
+
       // Send Slack notification
       if (isSlackConfigured()) {
         setSlackNotificationStatus('sending');
         try {
           const slackUser = findSlackUserByName(slackUsers, personToMeet.trim());
+          console.log('[CHECKIN] Found Slack user:', slackUser);
           
           if (slackUser) {
             const success = await sendSlackNotification(
@@ -246,11 +261,11 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
             );
             setSlackNotificationStatus(success ? 'success' : 'error');
           } else {
-            console.log('[SLACK] User not found in Slack directory:', personToMeet);
+            console.log('[CHECKIN] User not found in Slack directory:', personToMeet);
             setSlackNotificationStatus('error');
           }
         } catch (slackError) {
-          console.error('Slack notification failed:', slackError);
+          console.error('[CHECKIN] Slack notification failed:', slackError);
           setSlackNotificationStatus('error');
         }
       }
@@ -400,6 +415,27 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   </div>
                 </div>
               )}
+
+              {/* Slack Users Debug Info */}
+              {loadingSlackUsers && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                    <span className="text-blue-400 text-sm">Loading Slack users...</span>
+                  </div>
+                </div>
+              )}
+
+              {!loadingSlackUsers && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 text-sm">
+                      Loaded {slackUsers.length} Slack users
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Form section */}
@@ -497,33 +533,63 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                       <Users className="w-4 h-4 text-white" />
                     </div>
                     Person to Meet *
+                    {loadingSlackUsers && (
+                      <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                    )}
                   </label>
-                  <input
-                    type="text"
-                    value={formData.personToMeet}
-                    onChange={(e) => handlePersonToMeetChange(e.target.value)}
-                    className="person-to-meet-input w-full px-6 py-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
-                               focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
-                               placeholder-gray-400 text-lg transition-all duration-300"
-                    placeholder="Start typing name..."
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={formData.personToMeet}
+                      onChange={(e) => handlePersonToMeetChange(e.target.value)}
+                      onFocus={() => {
+                        if (formData.personToMeet.length > 0 && filteredUsers.length > 0) {
+                          setShowUserSuggestions(true);
+                        }
+                      }}
+                      className="person-to-meet-input w-full px-6 py-4 pr-12 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
+                                 focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
+                                 placeholder-gray-400 text-lg transition-all duration-300"
+                      placeholder="Start typing name..."
+                      required
+                    />
+                    <ChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                  </div>
                   
                   {/* Slack user suggestions */}
-                  {showUserSuggestions && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl max-h-48 overflow-y-auto z-50">
+                  {showUserSuggestions && filteredUsers.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl max-h-48 overflow-y-auto z-50 shadow-2xl">
                       {filteredUsers.map((user) => (
                         <button
                           key={user.id}
                           type="button"
                           onClick={() => selectSlackUser(user)}
-                          className="w-full text-left px-4 py-3 hover:bg-white/10 text-white transition-colors border-b border-white/10 last:border-b-0"
+                          className="w-full text-left px-4 py-3 hover:bg-white/10 text-white transition-colors border-b border-white/10 last:border-b-0 flex items-center gap-3"
                         >
-                          <div className="font-medium">{user.real_name}</div>
-                          <div className="text-sm text-gray-400">@{user.name}</div>
+                          <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-full flex items-center justify-center">
+                            <User className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <div className="font-medium">{user.real_name}</div>
+                            <div className="text-sm text-gray-400">@{user.name}</div>
+                          </div>
                         </button>
                       ))}
                     </div>
+                  )}
+
+                  {/* Show all users button when no filter */}
+                  {!showUserSuggestions && formData.personToMeet.length === 0 && slackUsers.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilteredUsers(slackUsers.slice(0, 10)); // Show first 10 users
+                        setShowUserSuggestions(true);
+                      }}
+                      className="absolute top-full left-0 right-0 mt-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+                    >
+                      Click to see all team members ({slackUsers.length} available)
+                    </button>
                   )}
                 </div>
 
