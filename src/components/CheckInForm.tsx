@@ -15,28 +15,27 @@ import {
   Shield,
   User,
   Users,
+  CheckCircle,
+  AlertCircle,
 } from 'lucide-react';
 import Joyride, { CallBackProps, STATUS, Step } from 'react-joyride';
 
 import { supabase } from '../supabaseClient';
 import { ReasonForVisit, REASON_OPTIONS } from '../types/visitor';
-import { sendSlackNotification, fetchSlackUsers } from '../utils/slackUtils';
+import { sendSlackNotification, fetchSlackUsers, findSlackUserByName, isSlackConfigured } from '../utils/slackUtils';
 
 interface CheckInFormProps {
-  /* after refactor we send { id, fullName } back to the parent */
   onSubmit: (data: { id: string; fullName: string }) => void;
   onBack: () => void;
 }
 
-/* ───────────────────────────────────────────────────────────── */
-
 export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
-  /* ── state ──────────────────────────────────────────────── */
   const [formData, setFormData] = useState({
     fullName: '',
     reasonForVisit: '' as ReasonForVisit,
     otherReason: '',
     personToMeet: '',
+    phoneNumber: '',
   });
 
   const [photo, setPhoto] = useState<string>('');
@@ -47,8 +46,9 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
   const [slackUsers, setSlackUsers] = useState<Array<{id: string, name: string, real_name: string}>>([]);
   const [filteredUsers, setFilteredUsers] = useState<Array<{id: string, name: string, real_name: string}>>([]);
   const [showUserSuggestions, setShowUserSuggestions] = useState(false);
+  const [slackNotificationStatus, setSlackNotificationStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
 
-  /* ── joy-ride (in-app tour) ─────────────────────────────── */
+  // Joy-ride (in-app tour)
   const [runTour, setRunTour] = useState(false);
   useEffect(() => {
     if (!localStorage.getItem('ottohello_tour_done')) setRunTour(true);
@@ -90,7 +90,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
     }
   };
 
-  /* ── slack integration ──────────────────────────────────── */
+  // Slack integration
   useEffect(() => {
     const loadSlackUsers = async () => {
       try {
@@ -123,7 +123,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
     setShowUserSuggestions(false);
   };
 
-  /* ── camera helpers ─────────────────────────────────────── */
+  // Camera helpers
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -176,18 +176,34 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
     stopCamera();
   };
 
-  /* ── generic helpers ────────────────────────────────────── */
   const handleInputChange = (field: string, value: string) =>
     setFormData((p) => ({ ...p, [field]: value }));
 
-  /* ── submit to Supabase ─────────────────────────────────── */
+  // Submit to Supabase
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError('');
+    setSlackNotificationStatus('idle');
 
-    const { fullName, reasonForVisit, otherReason, personToMeet } = formData;
-    if (!fullName || !reasonForVisit || !personToMeet) return;
-    if (reasonForVisit === 'other' && !otherReason) return;
+    const { fullName, reasonForVisit, otherReason, personToMeet, phoneNumber } = formData;
+    
+    // Validation
+    if (!fullName.trim()) {
+      setSubmitError('Please enter the visitor\'s full name');
+      return;
+    }
+    if (!reasonForVisit) {
+      setSubmitError('Please select a reason for visit');
+      return;
+    }
+    if (reasonForVisit === 'other' && !otherReason.trim()) {
+      setSubmitError('Please specify the reason for visit');
+      return;
+    }
+    if (!personToMeet.trim()) {
+      setSubmitError('Please enter who the visitor is meeting');
+      return;
+    }
     if (!photo) {
       setSubmitError('Please take a photo before submitting');
       return;
@@ -195,63 +211,72 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
 
     setSubmitting(true);
 
-    const { data, error } = await supabase
-      .from('visitors')
-      .insert([
-        {
-          full_name: fullName,
-          reason_for_visit:
-            reasonForVisit === 'other' ? otherReason : reasonForVisit,
-          person_to_meet: personToMeet,
-          photo_base64: photo || null,
-          checked_in_at: new Date().toISOString(),
-        },
-      ])
-      .select('id')
-      .single();
-
-    if (error || !data || !data.id) {
-      console.error(error);
-      setSubmitError(
-        error?.message ?? 'Could not save to Supabase. Please try again.'
-      );
-      setSubmitting(false);
-      return;
-    }
-
-    // Send Slack notification
     try {
-      const slackUser = slackUsers.find(user => 
-        user.real_name.toLowerCase() === personToMeet.toLowerCase() ||
-        user.name.toLowerCase() === personToMeet.toLowerCase()
-      );
-      
-      if (slackUser) {
-        await sendSlackNotification(slackUser.id, fullName, reasonForVisit === 'other' ? otherReason : reasonForVisit);
-      }
-    } catch (slackError) {
-      console.error('Failed to send Slack notification:', slackError);
-      // Don't fail the check-in if Slack fails
-    }
+      // Insert visitor record
+      const { data, error } = await supabase
+        .from('visitors')
+        .insert([
+          {
+            full_name: fullName.trim(),
+            reason_for_visit: reasonForVisit === 'other' ? otherReason.trim() : reasonForVisit,
+            person_to_meet: personToMeet.trim(),
+            photo_base64: photo,
+            phone_number: phoneNumber.trim() || null,
+            checked_in_at: new Date().toISOString(),
+          },
+        ])
+        .select('id')
+        .single();
 
-    setSubmitting(false);
-    onSubmit({ id: data.id, fullName });
+      if (error || !data?.id) {
+        throw new Error(error?.message || 'Failed to save visitor data');
+      }
+
+      // Send Slack notification
+      if (isSlackConfigured()) {
+        setSlackNotificationStatus('sending');
+        try {
+          const slackUser = findSlackUserByName(slackUsers, personToMeet.trim());
+          
+          if (slackUser) {
+            const success = await sendSlackNotification(
+              slackUser.id, 
+              fullName.trim(), 
+              reasonForVisit === 'other' ? otherReason.trim() : reasonForVisit
+            );
+            setSlackNotificationStatus(success ? 'success' : 'error');
+          } else {
+            console.log('[SLACK] User not found in Slack directory:', personToMeet);
+            setSlackNotificationStatus('error');
+          }
+        } catch (slackError) {
+          console.error('Slack notification failed:', slackError);
+          setSlackNotificationStatus('error');
+        }
+      }
+
+      setSubmitting(false);
+      onSubmit({ id: data.id, fullName: fullName.trim() });
+
+    } catch (error) {
+      console.error('Check-in error:', error);
+      setSubmitError(error instanceof Error ? error.message : 'Failed to complete check-in. Please try again.');
+      setSubmitting(false);
+    }
   };
 
-  /* ── UI ─────────────────────────────────────────────────── */
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 relative overflow-hidden">
-      {/* glowy blobs */}
+      {/* Background elements */}
       <div className="absolute inset-0">
         <div className="absolute top-20 right-20 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-20 left-20 w-72 h-72 bg-cyan-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
       </div>
-      {/* grid pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:50px_50px]" />
 
       <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
         <div className="max-w-4xl w-full">
-          {/* header bar */}
+          {/* Header */}
           <div className="flex items-center gap-6 mb-12">
             <button
               onClick={onBack}
@@ -270,7 +295,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-            {/* ── camera card ───────────────────────────────── */}
+            {/* Camera section */}
             <div className="space-y-8">
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
                 <div className="text-center">
@@ -281,9 +306,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                     </h3>
                   </div>
 
-                  {/* 3 camera states: live / preview / placeholder */}
                   {showCamera ? (
-                    /* live camera */
                     <div className="space-y-6">
                       <div className="relative">
                         <video
@@ -311,7 +334,6 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                       </div>
                     </div>
                   ) : photo ? (
-                    /* captured preview */
                     <div className="space-y-6">
                       <div className="relative">
                         <img
@@ -331,7 +353,6 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                       </button>
                     </div>
                   ) : (
-                    /* placeholder */
                     <div className="space-y-6">
                       <div className="w-48 h-36 mx-auto bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border-2 border-dashed border-gray-600 flex items-center justify-center">
                         <Camera className="w-12 h-12 text-gray-500" />
@@ -353,12 +374,38 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   )}
                 </div>
               </div>
+
+              {/* Slack status indicator */}
+              {slackNotificationStatus !== 'idle' && (
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                  <div className="flex items-center gap-3">
+                    {slackNotificationStatus === 'sending' && (
+                      <>
+                        <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                        <span className="text-blue-400">Sending Slack notification...</span>
+                      </>
+                    )}
+                    {slackNotificationStatus === 'success' && (
+                      <>
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <span className="text-green-400">Slack notification sent!</span>
+                      </>
+                    )}
+                    {slackNotificationStatus === 'error' && (
+                      <>
+                        <AlertCircle className="w-5 h-5 text-orange-400" />
+                        <span className="text-orange-400">Slack notification failed (check-in still successful)</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* ── form card ─────────────────────────────────── */}
+            {/* Form section */}
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
               <form onSubmit={handleSubmit} className="space-y-8">
-                {/* full-name */}
+                {/* Full Name */}
                 <div>
                   <label className="block text-white font-medium mb-3 flex items-center gap-3">
                     <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-cyan-600 rounded-lg flex items-center justify-center">
@@ -369,18 +416,35 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   <input
                     type="text"
                     value={formData.fullName}
-                    onChange={(e) =>
-                      handleInputChange('fullName', e.target.value)
-                    }
+                    onChange={(e) => handleInputChange('fullName', e.target.value)}
                     className="full-name-input w-full px-6 py-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
                                focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
                                placeholder-gray-400 text-lg transition-all duration-300"
-                    placeholder="Enter your full name"
+                    placeholder="Enter visitor's full name"
                     required
                   />
                 </div>
 
-                {/* purpose */}
+                {/* Phone Number */}
+                <div>
+                  <label className="block text-white font-medium mb-3 flex items-center gap-3">
+                    <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-emerald-600 rounded-lg flex items-center justify-center">
+                      <MessageSquare className="w-4 h-4 text-white" />
+                    </div>
+                    Phone Number (Optional)
+                  </label>
+                  <input
+                    type="tel"
+                    value={formData.phoneNumber}
+                    onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+                    className="w-full px-6 py-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
+                               focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
+                               placeholder-gray-400 text-lg transition-all duration-300"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+
+                {/* Purpose */}
                 <div>
                   <label className="block text-white font-medium mb-3 flex items-center gap-3">
                     <div className="w-8 h-8 bg-gradient-to-br from-purple-400 to-pink-600 rounded-lg flex items-center justify-center">
@@ -390,12 +454,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   </label>
                   <select
                     value={formData.reasonForVisit}
-                    onChange={(e) =>
-                      handleInputChange(
-                        'reasonForVisit',
-                        e.target.value as ReasonForVisit,
-                      )
-                    }
+                    onChange={(e) => handleInputChange('reasonForVisit', e.target.value as ReasonForVisit)}
                     className="purpose-select w-full px-6 py-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
                                focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
                                text-lg transition-all duration-300"
@@ -405,18 +464,14 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                       Select purpose of visit
                     </option>
                     {REASON_OPTIONS.map((opt) => (
-                      <option
-                        key={opt.value}
-                        value={opt.value}
-                        className="bg-gray-800"
-                      >
+                      <option key={opt.value} value={opt.value} className="bg-gray-800">
                         {opt.label}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* other reason */}
+                {/* Other reason */}
                 {formData.reasonForVisit === 'other' && (
                   <div>
                     <label className="block text-white font-medium mb-3">
@@ -425,9 +480,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                     <input
                       type="text"
                       value={formData.otherReason}
-                      onChange={(e) =>
-                        handleInputChange('otherReason', e.target.value)
-                      }
+                      onChange={(e) => handleInputChange('otherReason', e.target.value)}
                       className="w-full px-6 py-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
                                  focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
                                  placeholder-gray-400 text-lg transition-all duration-300"
@@ -437,7 +490,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   </div>
                 )}
 
-                {/* person to meet */}
+                {/* Person to meet */}
                 <div className="relative">
                   <label className="block text-white font-medium mb-3 flex items-center gap-3">
                     <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-lg flex items-center justify-center">
@@ -474,7 +527,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   )}
                 </div>
 
-                {/* submit */}
+                {/* Submit */}
                 <button
                   type="submit"
                   disabled={submitting}
@@ -488,13 +541,16 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   ) : (
                     <Clock className="w-6 h-6" />
                   )}
-                  {submitting ? 'Saving…' : 'Complete Check-In'}
+                  {submitting ? 'Processing...' : 'Complete Check-In'}
                 </button>
 
                 {submitError && (
-                  <p className="text-center text-red-400 text-sm mt-2">
-                    {submitError}
-                  </p>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+                    <p className="text-red-400 text-sm flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      {submitError}
+                    </p>
+                  </div>
                 )}
               </form>
             </div>
@@ -502,10 +558,10 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
         </div>
       </div>
 
-      {/* hidden canvas for snapshots */}
+      {/* Hidden canvas for photo capture */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* joyride overlay */}
+      {/* Joyride tour */}
       <Joyride
         steps={tourSteps}
         run={runTour}

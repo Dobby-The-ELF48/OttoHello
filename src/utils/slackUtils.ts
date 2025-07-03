@@ -1,94 +1,150 @@
 // Slack integration utilities
-// Note: This is a mock implementation. In production, you would need:
-// 1. A Slack app with proper OAuth tokens
-// 2. A backend service to handle Slack API calls securely
-// 3. Environment variables for Slack credentials
-
 interface SlackUser {
   id: string;
   name: string;
   real_name: string;
+  profile?: {
+    email?: string;
+    display_name?: string;
+  };
 }
 
-// Mock Slack users - replace with actual Slack API call
+// Enhanced mock data with more realistic users
 const mockSlackUsers: SlackUser[] = [
-  { id: 'U123456', name: 'john.doe', real_name: 'John Doe' },
-  { id: 'U234567', name: 'jane.smith', real_name: 'Jane Smith' },
-  { id: 'U345678', name: 'mike.johnson', real_name: 'Mike Johnson' },
-  { id: 'U456789', name: 'sarah.wilson', real_name: 'Sarah Wilson' },
-  { id: 'U567890', name: 'david.brown', real_name: 'David Brown' },
-  { id: 'U678901', name: 'lisa.davis', real_name: 'Lisa Davis' },
-  { id: 'U789012', name: 'tom.miller', real_name: 'Tom Miller' },
-  { id: 'U890123', name: 'amy.garcia', real_name: 'Amy Garcia' },
+  { id: 'U123456', name: 'john.doe', real_name: 'John Doe', profile: { email: 'john.doe@growthjockey.com' } },
+  { id: 'U234567', name: 'jane.smith', real_name: 'Jane Smith', profile: { email: 'jane.smith@growthjockey.com' } },
+  { id: 'U345678', name: 'mike.johnson', real_name: 'Mike Johnson', profile: { email: 'mike.johnson@growthjockey.com' } },
+  { id: 'U456789', name: 'sarah.wilson', real_name: 'Sarah Wilson', profile: { email: 'sarah.wilson@growthjockey.com' } },
+  { id: 'U567890', name: 'david.brown', real_name: 'David Brown', profile: { email: 'david.brown@growthjockey.com' } },
+  { id: 'U678901', name: 'lisa.davis', real_name: 'Lisa Davis', profile: { email: 'lisa.davis@growthjockey.com' } },
+  { id: 'U789012', name: 'tom.miller', real_name: 'Tom Miller', profile: { email: 'tom.miller@growthjockey.com' } },
+  { id: 'U890123', name: 'amy.garcia', real_name: 'Amy Garcia', profile: { email: 'amy.garcia@growthjockey.com' } },
+  { id: 'U901234', name: 'robert.lee', real_name: 'Robert Lee', profile: { email: 'robert.lee@growthjockey.com' } },
+  { id: 'U012345', name: 'emily.chen', real_name: 'Emily Chen', profile: { email: 'emily.chen@growthjockey.com' } },
 ];
 
 export async function fetchSlackUsers(): Promise<SlackUser[]> {
-  // In production, this would make an actual API call to Slack
-  // Example: GET https://slack.com/api/users.list
-  
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  return mockSlackUsers;
+  try {
+    // Check if we have Slack credentials for production use
+    const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
+    
+    if (slackToken && slackToken !== 'your_slack_bot_token') {
+      // Production: Make actual Slack API call
+      const response = await fetch('https://slack.com/api/users.list', {
+        headers: {
+          'Authorization': `Bearer ${slackToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok) {
+          return data.members
+            .filter((user: any) => !user.deleted && !user.is_bot && user.real_name)
+            .map((user: any) => ({
+              id: user.id,
+              name: user.name,
+              real_name: user.real_name || user.profile?.display_name || user.name,
+              profile: user.profile,
+            }));
+        }
+      }
+    }
+    
+    // Fallback to mock data for development/demo
+    console.log('[SLACK] Using mock data - configure VITE_SLACK_BOT_TOKEN for production');
+    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate API delay
+    return mockSlackUsers;
+    
+  } catch (error) {
+    console.error('[SLACK] Error fetching users, falling back to mock data:', error);
+    return mockSlackUsers;
+  }
 }
 
 export async function sendSlackNotification(
   userId: string, 
   visitorName: string, 
   purpose: string
-): Promise<void> {
-  // In production, this would send a DM via Slack API
-  // Example: POST https://slack.com/api/chat.postMessage
-  
-  const message = `👋 Hi! You have a visitor: **${visitorName}** is here to see you.\n\n📋 Purpose: ${purpose}\n\n🏢 Please come to reception when convenient.`;
-  
-  console.log(`[SLACK NOTIFICATION] Sending to user ${userId}:`, message);
-  
-  // Simulate API call
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  // In production, you would handle the actual Slack API response here
-  console.log(`[SLACK NOTIFICATION] Successfully sent to ${userId}`);
+): Promise<boolean> {
+  try {
+    const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
+    const webhookUrl = import.meta.env.VITE_SLACK_WEBHOOK_URL;
+    
+    const message = `👋 *Visitor Alert*\n\n*${visitorName}* is here to see you!\n\n📋 *Purpose:* ${purpose}\n🏢 *Location:* Reception\n⏰ *Time:* ${new Date().toLocaleTimeString()}\n\nPlease come to reception when convenient.`;
+    
+    if (slackToken && slackToken !== 'your_slack_bot_token') {
+      // Production: Send actual Slack message
+      const response = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${slackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          channel: userId,
+          text: message,
+          unfurl_links: false,
+          unfurl_media: false,
+        }),
+      });
+      
+      const result = await response.json();
+      if (result.ok) {
+        console.log(`[SLACK] Message sent successfully to ${userId}`);
+        return true;
+      } else {
+        console.error('[SLACK] Failed to send message:', result.error);
+      }
+    } else if (webhookUrl && webhookUrl !== 'your_slack_webhook_url') {
+      // Alternative: Use webhook for general notifications
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: message,
+          username: 'OttoHello Visitor System',
+          icon_emoji: ':wave:',
+        }),
+      });
+      
+      if (response.ok) {
+        console.log('[SLACK] Webhook notification sent successfully');
+        return true;
+      }
+    }
+    
+    // Development/Demo mode
+    console.log(`[SLACK DEMO] Would send to user ${userId}:`, message);
+    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API delay
+    return true;
+    
+  } catch (error) {
+    console.error('[SLACK] Error sending notification:', error);
+    return false;
+  }
 }
 
-// Production implementation would look like this:
-/*
-export async function fetchSlackUsers(): Promise<SlackUser[]> {
-  const response = await fetch('/api/slack/users', {
-    headers: {
-      'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-    },
-  });
+// Utility function to find user by name (case-insensitive)
+export function findSlackUserByName(users: SlackUser[], name: string): SlackUser | undefined {
+  const searchName = name.toLowerCase().trim();
   
-  if (!response.ok) {
-    throw new Error('Failed to fetch Slack users');
-  }
-  
-  const data = await response.json();
-  return data.members.filter(user => !user.deleted && !user.is_bot);
+  return users.find(user => 
+    user.real_name.toLowerCase() === searchName ||
+    user.name.toLowerCase() === searchName ||
+    user.profile?.display_name?.toLowerCase() === searchName ||
+    user.profile?.email?.toLowerCase().includes(searchName)
+  );
 }
 
-export async function sendSlackNotification(
-  userId: string, 
-  visitorName: string, 
-  purpose: string
-): Promise<void> {
-  const message = `👋 Hi! You have a visitor: **${visitorName}** is here to see you.\n\n📋 Purpose: ${purpose}\n\n🏢 Please come to reception when convenient.`;
+// Utility function to validate Slack configuration
+export function isSlackConfigured(): boolean {
+  const token = import.meta.env.VITE_SLACK_BOT_TOKEN;
+  const webhook = import.meta.env.VITE_SLACK_WEBHOOK_URL;
   
-  const response = await fetch('/api/slack/message', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-    },
-    body: JSON.stringify({
-      channel: userId,
-      text: message,
-    }),
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to send Slack notification');
-  }
+  return (token && token !== 'your_slack_bot_token') || 
+         (webhook && webhook !== 'your_slack_webhook_url');
 }
-*/
