@@ -28,7 +28,7 @@ export async function fetchSlackUsers(): Promise<SlackUser[]> {
     // Check if we have Slack credentials for production use
     const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
     
-    if (slackToken && slackToken !== 'your_slack_bot_token') {
+    if (slackToken && slackToken !== 'your_slack_bot_token' && slackToken.startsWith('xoxb-')) {
       // Production: Make actual Slack API call
       const response = await fetch('https://slack.com/api/users.list', {
         headers: {
@@ -74,7 +74,7 @@ export async function sendSlackNotification(
     
     const message = `👋 *Visitor Alert*\n\n*${visitorName}* is here to see you!\n\n📋 *Purpose:* ${purpose}\n🏢 *Location:* Reception\n⏰ *Time:* ${new Date().toLocaleTimeString()}\n\nPlease come to reception when convenient.`;
     
-    if (slackToken && slackToken !== 'your_slack_bot_token') {
+    if (slackToken && slackToken !== 'your_slack_bot_token' && slackToken.startsWith('xoxb-')) {
       // Production: Send actual Slack message
       const response = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
@@ -97,7 +97,7 @@ export async function sendSlackNotification(
       } else {
         console.error('[SLACK] Failed to send message:', result.error);
       }
-    } else if (webhookUrl && webhookUrl !== 'your_slack_webhook_url') {
+    } else if (webhookUrl && webhookUrl !== 'your_slack_webhook_url' && webhookUrl.startsWith('https://hooks.slack.com/')) {
       // Alternative: Use webhook for general notifications
       const response = await fetch(webhookUrl, {
         method: 'POST',
@@ -145,6 +145,6 @@ export function isSlackConfigured(): boolean {
   const token = import.meta.env.VITE_SLACK_BOT_TOKEN;
   const webhook = import.meta.env.VITE_SLACK_WEBHOOK_URL;
   
-  return (token && token !== 'your_slack_bot_token') || 
-         (webhook && webhook !== 'your_slack_webhook_url');
+  return (token && token !== 'your_slack_bot_token' && token.startsWith('xoxb-')) || 
+         (webhook && webhook !== 'your_slack_webhook_url' && webhook.startsWith('https://hooks.slack.com/'));
 }
