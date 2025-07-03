@@ -50,7 +50,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
   const [slackNotificationStatus, setSlackNotificationStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
   const [loadingSlackUsers, setLoadingSlackUsers] = useState(true);
 
-  // Joy-ride (in-app tour)
+  // Joy-ride (in-app tour) - RESTORED!
   const [runTour, setRunTour] = useState(false);
   useEffect(() => {
     if (!localStorage.getItem('ottohello_tour_done')) setRunTour(true);
@@ -131,6 +131,16 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
   const selectSlackUser = (user: {id: string, name: string, real_name: string}) => {
     console.log('[CHECKIN] Selected user:', user);
     setFormData(p => ({ ...p, personToMeet: user.real_name }));
+    setShowUserSuggestions(false);
+    setFilteredUsers([]);
+  };
+
+  const showAllUsers = () => {
+    setFilteredUsers(slackUsers.slice(0, 12)); // Show first 12 users
+    setShowUserSuggestions(true);
+  };
+
+  const hideDropdown = () => {
     setShowUserSuggestions(false);
     setFilteredUsers([]);
   };
@@ -526,7 +536,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                   </div>
                 )}
 
-                {/* Person to meet */}
+                {/* Person to meet - FIXED POSITIONING */}
                 <div className="relative">
                   <label className="block text-white font-medium mb-3 flex items-center gap-3">
                     <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-lg flex items-center justify-center">
@@ -547,23 +557,36 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                           setShowUserSuggestions(true);
                         }
                       }}
+                      onBlur={() => {
+                        // Delay hiding to allow clicks on dropdown
+                        setTimeout(() => hideDropdown(), 150);
+                      }}
                       className="person-to-meet-input w-full px-6 py-4 pr-12 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl
                                  focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white
                                  placeholder-gray-400 text-lg transition-all duration-300"
                       placeholder="Start typing name..."
                       required
                     />
-                    <ChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                    <button
+                      type="button"
+                      onClick={showAllUsers}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    >
+                      <ChevronDown className="w-5 h-5" />
+                    </button>
                   </div>
                   
-                  {/* Slack user suggestions */}
+                  {/* Slack user suggestions - FIXED Z-INDEX */}
                   {showUserSuggestions && filteredUsers.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl max-h-48 overflow-y-auto z-50 shadow-2xl">
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl max-h-48 overflow-y-auto z-[9999] shadow-2xl">
                       {filteredUsers.map((user) => (
                         <button
                           key={user.id}
                           type="button"
-                          onClick={() => selectSlackUser(user)}
+                          onMouseDown={(e) => {
+                            e.preventDefault(); // Prevent blur event
+                            selectSlackUser(user);
+                          }}
                           className="w-full text-left px-4 py-3 hover:bg-white/10 text-white transition-colors border-b border-white/10 last:border-b-0 flex items-center gap-3"
                         >
                           <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-full flex items-center justify-center">
@@ -578,46 +601,47 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
                     </div>
                   )}
 
-                  {/* Show all users button when no filter */}
+                  {/* Show all users button when no filter - FIXED POSITIONING */}
                   {!showUserSuggestions && formData.personToMeet.length === 0 && slackUsers.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFilteredUsers(slackUsers.slice(0, 10)); // Show first 10 users
-                        setShowUserSuggestions(true);
-                      }}
-                      className="absolute top-full left-0 right-0 mt-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center text-gray-400 hover:text-white hover:bg-white/10 transition-all"
-                    >
-                      Click to see all team members ({slackUsers.length} available)
-                    </button>
+                    <div className="mt-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
+                      <button
+                        type="button"
+                        onClick={showAllUsers}
+                        className="text-gray-400 hover:text-white transition-all text-sm"
+                      >
+                        Click to see all team members ({slackUsers.length} available)
+                      </button>
+                    </div>
                   )}
                 </div>
 
-                {/* Submit */}
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="checkin-submit w-full bg-gradient-to-r from-cyan-500 to-blue-600
-                             hover:from-cyan-400 hover:to-blue-500 text-white font-bold py-6 px-8
-                             rounded-xl text-xl transition-all duration-300 flex items-center
-                             justify-center gap-4 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {submitting ? (
-                    <Loader2 className="animate-spin w-6 h-6" />
-                  ) : (
-                    <Clock className="w-6 h-6" />
-                  )}
-                  {submitting ? 'Processing...' : 'Complete Check-In'}
-                </button>
+                {/* Submit - MOVED TO BOTTOM */}
+                <div className="pt-4">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="checkin-submit w-full bg-gradient-to-r from-cyan-500 to-blue-600
+                               hover:from-cyan-400 hover:to-blue-500 text-white font-bold py-6 px-8
+                               rounded-xl text-xl transition-all duration-300 flex items-center
+                               justify-center gap-4 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {submitting ? (
+                      <Loader2 className="animate-spin w-6 h-6" />
+                    ) : (
+                      <Clock className="w-6 h-6" />
+                    )}
+                    {submitting ? 'Processing...' : 'Complete Check-In'}
+                  </button>
 
-                {submitError && (
-                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4">
-                    <p className="text-red-400 text-sm flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4" />
-                      {submitError}
-                    </p>
-                  </div>
-                )}
+                  {submitError && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 mt-4">
+                      <p className="text-red-400 text-sm flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        {submitError}
+                      </p>
+                    </div>
+                  )}
+                </div>
               </form>
             </div>
           </div>
@@ -627,7 +651,7 @@ export default function CheckInForm({ onSubmit, onBack }: CheckInFormProps) {
       {/* Hidden canvas for photo capture */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Joyride tour */}
+      {/* Joyride tour - RESTORED! */}
       <Joyride
         steps={tourSteps}
         run={runTour}
