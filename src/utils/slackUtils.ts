@@ -1,4 +1,4 @@
-// Slack integration utilities
+// Production Slack integration utilities
 interface SlackUser {
   id: string;
   name: string;
@@ -6,10 +6,11 @@ interface SlackUser {
   profile?: {
     email?: string;
     display_name?: string;
+    real_name?: string;
   };
 }
 
-// Enhanced mock data with more realistic users
+// Enhanced mock data as fallback
 const mockSlackUsers: SlackUser[] = [
   { id: 'U123456', name: 'john.doe', real_name: 'John Doe', profile: { email: 'john.doe@growthjockey.com' } },
   { id: 'U234567', name: 'jane.smith', real_name: 'Jane Smith', profile: { email: 'jane.smith@growthjockey.com' } },
@@ -21,16 +22,19 @@ const mockSlackUsers: SlackUser[] = [
   { id: 'U890123', name: 'amy.garcia', real_name: 'Amy Garcia', profile: { email: 'amy.garcia@growthjockey.com' } },
   { id: 'U901234', name: 'robert.lee', real_name: 'Robert Lee', profile: { email: 'robert.lee@growthjockey.com' } },
   { id: 'U012345', name: 'emily.chen', real_name: 'Emily Chen', profile: { email: 'emily.chen@growthjockey.com' } },
+  { id: 'U112233', name: 'alex.kumar', real_name: 'Alex Kumar', profile: { email: 'alex.kumar@growthjockey.com' } },
+  { id: 'U223344', name: 'priya.sharma', real_name: 'Priya Sharma', profile: { email: 'priya.sharma@growthjockey.com' } },
 ];
 
 export async function fetchSlackUsers(): Promise<SlackUser[]> {
   try {
-    // Check if we have Slack credentials for production use
     const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
     
-    if (slackToken && slackToken !== 'your_slack_bot_token' && slackToken.startsWith('xoxb-')) {
-      // Production: Make actual Slack API call
+    if (slackToken && slackToken.startsWith('xoxb-')) {
+      console.log('[SLACK] Fetching users from Slack API...');
+      
       const response = await fetch('https://slack.com/api/users.list', {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${slackToken}`,
           'Content-Type': 'application/json',
@@ -39,26 +43,39 @@ export async function fetchSlackUsers(): Promise<SlackUser[]> {
       
       if (response.ok) {
         const data = await response.json();
-        if (data.ok) {
-          return data.members
-            .filter((user: any) => !user.deleted && !user.is_bot && user.real_name)
+        if (data.ok && data.members) {
+          const users = data.members
+            .filter((user: any) => 
+              !user.deleted && 
+              !user.is_bot && 
+              !user.is_app_user &&
+              user.real_name &&
+              user.name !== 'slackbot'
+            )
             .map((user: any) => ({
               id: user.id,
               name: user.name,
-              real_name: user.real_name || user.profile?.display_name || user.name,
+              real_name: user.real_name || user.profile?.real_name || user.profile?.display_name || user.name,
               profile: user.profile,
             }));
+          
+          console.log(`[SLACK] Successfully fetched ${users.length} users from Slack`);
+          return users;
+        } else {
+          console.error('[SLACK] API Error:', data.error);
         }
+      } else {
+        console.error('[SLACK] HTTP Error:', response.status, response.statusText);
       }
     }
     
-    // Fallback to mock data for development/demo
-    console.log('[SLACK] Using mock data - configure VITE_SLACK_BOT_TOKEN for production');
-    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate API delay
+    // Fallback to mock data
+    console.log('[SLACK] Using mock data - check VITE_SLACK_BOT_TOKEN configuration');
+    await new Promise(resolve => setTimeout(resolve, 300));
     return mockSlackUsers;
     
   } catch (error) {
-    console.error('[SLACK] Error fetching users, falling back to mock data:', error);
+    console.error('[SLACK] Error fetching users:', error);
     return mockSlackUsers;
   }
 }
@@ -72,10 +89,26 @@ export async function sendSlackNotification(
     const slackToken = import.meta.env.VITE_SLACK_BOT_TOKEN;
     const webhookUrl = import.meta.env.VITE_SLACK_WEBHOOK_URL;
     
-    const message = `👋 *Visitor Alert*\n\n*${visitorName}* is here to see you!\n\n📋 *Purpose:* ${purpose}\n🏢 *Location:* Reception\n⏰ *Time:* ${new Date().toLocaleTimeString()}\n\nPlease come to reception when convenient.`;
+    const currentTime = new Date().toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
     
-    if (slackToken && slackToken !== 'your_slack_bot_token' && slackToken.startsWith('xoxb-')) {
-      // Production: Send actual Slack message
+    const message = `👋 *Visitor Alert*
+
+*${visitorName}* is here to see you!
+
+📋 *Purpose:* ${purpose}
+🏢 *Location:* Reception Desk
+⏰ *Time:* ${currentTime}
+
+Please come to reception when convenient. Thank you! 🙏`;
+
+    // Try direct message first (if we have bot token)
+    if (slackToken && slackToken.startsWith('xoxb-')) {
+      console.log(`[SLACK] Sending direct message to user ${userId}...`);
+      
       const response = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
@@ -87,18 +120,25 @@ export async function sendSlackNotification(
           text: message,
           unfurl_links: false,
           unfurl_media: false,
+          username: 'OttoHello Visitor System',
+          icon_emoji: ':wave:',
         }),
       });
       
       const result = await response.json();
       if (result.ok) {
-        console.log(`[SLACK] Message sent successfully to ${userId}`);
+        console.log(`[SLACK] Direct message sent successfully to ${userId}`);
         return true;
       } else {
-        console.error('[SLACK] Failed to send message:', result.error);
+        console.error('[SLACK] Direct message failed:', result.error);
+        // Fall through to webhook
       }
-    } else if (webhookUrl && webhookUrl !== 'your_slack_webhook_url' && webhookUrl.startsWith('https://hooks.slack.com/')) {
-      // Alternative: Use webhook for general notifications
+    }
+    
+    // Try webhook as fallback
+    if (webhookUrl && webhookUrl.startsWith('https://hooks.slack.com/')) {
+      console.log('[SLACK] Sending webhook notification...');
+      
       const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
@@ -114,12 +154,19 @@ export async function sendSlackNotification(
       if (response.ok) {
         console.log('[SLACK] Webhook notification sent successfully');
         return true;
+      } else {
+        console.error('[SLACK] Webhook failed:', response.status, response.statusText);
       }
     }
     
     // Development/Demo mode
-    console.log(`[SLACK DEMO] Would send to user ${userId}:`, message);
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API delay
+    console.log(`[SLACK DEMO] Would send notification:`, {
+      userId,
+      visitorName,
+      purpose,
+      message
+    });
+    
     return true;
     
   } catch (error) {
@@ -128,16 +175,41 @@ export async function sendSlackNotification(
   }
 }
 
-// Utility function to find user by name (case-insensitive)
+// Utility function to find user by name (case-insensitive, fuzzy matching)
 export function findSlackUserByName(users: SlackUser[], name: string): SlackUser | undefined {
   const searchName = name.toLowerCase().trim();
   
-  return users.find(user => 
+  // Exact matches first
+  let user = users.find(user => 
     user.real_name.toLowerCase() === searchName ||
     user.name.toLowerCase() === searchName ||
-    user.profile?.display_name?.toLowerCase() === searchName ||
+    user.profile?.display_name?.toLowerCase() === searchName
+  );
+  
+  if (user) return user;
+  
+  // Partial matches
+  user = users.find(user => 
+    user.real_name.toLowerCase().includes(searchName) ||
+    user.name.toLowerCase().includes(searchName) ||
+    user.profile?.display_name?.toLowerCase().includes(searchName) ||
     user.profile?.email?.toLowerCase().includes(searchName)
   );
+  
+  if (user) return user;
+  
+  // First name or last name matches
+  const nameParts = searchName.split(' ');
+  if (nameParts.length > 1) {
+    user = users.find(user => {
+      const userNameParts = user.real_name.toLowerCase().split(' ');
+      return nameParts.some(part => 
+        userNameParts.some(userPart => userPart.includes(part))
+      );
+    });
+  }
+  
+  return user;
 }
 
 // Utility function to validate Slack configuration
@@ -145,6 +217,21 @@ export function isSlackConfigured(): boolean {
   const token = import.meta.env.VITE_SLACK_BOT_TOKEN;
   const webhook = import.meta.env.VITE_SLACK_WEBHOOK_URL;
   
-  return (token && token !== 'your_slack_bot_token' && token.startsWith('xoxb-')) || 
-         (webhook && webhook !== 'your_slack_webhook_url' && webhook.startsWith('https://hooks.slack.com/'));
+  return (token && token.startsWith('xoxb-')) || 
+         (webhook && webhook.startsWith('https://hooks.slack.com/'));
+}
+
+// Get Slack configuration status for UI
+export function getSlackStatus(): { configured: boolean; hasBot: boolean; hasWebhook: boolean } {
+  const token = import.meta.env.VITE_SLACK_BOT_TOKEN;
+  const webhook = import.meta.env.VITE_SLACK_WEBHOOK_URL;
+  
+  const hasBot = !!(token && token.startsWith('xoxb-'));
+  const hasWebhook = !!(webhook && webhook.startsWith('https://hooks.slack.com/'));
+  
+  return {
+    configured: hasBot || hasWebhook,
+    hasBot,
+    hasWebhook
+  };
 }

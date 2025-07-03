@@ -7,35 +7,38 @@ import {
   MapPin,
   Users,
   Activity,
+  Loader2,
+  CheckCircle,
+  AlertCircle,
 } from 'lucide-react';
 import { LocalVisitor } from '../hooks/useVisitorStorage';
 import { supabase } from '../supabaseClient';
 
-/* ---------- props ---------------------------------------------------- */
 interface CheckOutFormProps {
   visitors: LocalVisitor[];
   onCheckOut: (visitorId: string) => void;
   onBack: () => void;
 }
 
-/* ==================================================================== */
 export default function CheckOutForm({
   visitors,
   onCheckOut,
   onBack,
 }: CheckOutFormProps) {
-  const [searchTerm,   setSearchTerm]   = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [foundVisitor, setFoundVisitor] = useState<LocalVisitor | null>(null);
-  const [notFound,     setNotFound]     = useState(false);
-  const [checkingOut,  setCheckingOut]  = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
 
-  /* ---------- helpers ------------------------------------------------ */
   const formatPurpose = (v: LocalVisitor) => {
     if (v.reasonForVisit === 'other') return v.otherReason ?? 'Other';
-    if (v.reasonForVisit)
+    if (v.reasonForVisit) {
       return v.reasonForVisit
-        .replace('-', ' ')
+        .replace(/-/g, ' ')
         .replace(/\b\w/g, (l) => l.toUpperCase());
+    }
     return '—';
   };
 
@@ -44,10 +47,15 @@ export default function CheckOutForm({
   const handleSearch = () => {
     if (!searchTerm.trim()) return;
 
+    setCheckoutError('');
+    setCheckoutSuccess(false);
+
+    const searchLower = searchTerm.toLowerCase().trim();
     const vis = activeVisitors.find(
       (v) =>
-        v.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (v.phoneNumber && v.phoneNumber.includes(searchTerm)),
+        v.fullName.toLowerCase().includes(searchLower) ||
+        (v.phoneNumber && v.phoneNumber.includes(searchTerm.trim())) ||
+        (v.personToMeet && v.personToMeet.toLowerCase().includes(searchLower))
     );
 
     if (vis) {
@@ -67,39 +75,69 @@ export default function CheckOutForm({
     if (!foundVisitor || checkingOut) return;
     
     setCheckingOut(true);
+    setCheckoutError('');
+    setCheckoutSuccess(false);
     
     try {
+      const checkoutTime = new Date().toISOString();
+      
       // Update Supabase with checkout time
       const { error } = await supabase
         .from('visitors')
         .update({ 
-          checked_out_at: new Date().toISOString() 
+          checked_out_at: checkoutTime 
         })
         .eq('id', foundVisitor.id);
 
       if (error) {
-        console.error('Failed to update checkout time in Supabase:', error);
-        // Still proceed with local checkout even if Supabase fails
+        console.error('Supabase checkout error:', error);
+        setCheckoutError('Failed to update checkout time in database. Please try again.');
+        setCheckingOut(false);
+        return;
       }
+
+      console.log(`[CHECKOUT] Successfully updated checkout time for visitor ${foundVisitor.id}`);
+      
+      // Update local storage
+      onCheckOut(foundVisitor.id);
+      
+      setCheckoutSuccess(true);
+      
+      // Auto-redirect after success
+      setTimeout(() => {
+        setFoundVisitor(null);
+        setSearchTerm('');
+        setCheckoutSuccess(false);
+      }, 2000);
+      
     } catch (error) {
-      console.error('Error updating checkout time:', error);
+      console.error('Checkout error:', error);
+      setCheckoutError('An unexpected error occurred. Please try again.');
     }
     
     setCheckingOut(false);
-    onCheckOut(foundVisitor.id);
   };
 
   const getVisitDuration = (iso: string) => {
     const ms = Date.now() - new Date(iso).getTime();
-    const h  = Math.floor(ms / 3_600_000);
-    const m  = Math.floor((ms % 3_600_000) / 60_000);
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
+    
+    if (h === 0) return `${m}m`;
     return `${h}h ${m}m`;
   };
 
-  /* --------------------------- UI ----------------------------------- */
+  const resetSearch = () => {
+    setSearchTerm('');
+    setFoundVisitor(null);
+    setNotFound(false);
+    setCheckoutError('');
+    setCheckoutSuccess(false);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-emerald-900 to-slate-900 relative overflow-hidden">
-      {/* animated blobs + grid background (unchanged) */}
+      {/* Background elements */}
       <div className="absolute inset-0">
         <div className="absolute top-20 left-20 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute bottom-20 right-20 w-72 h-72 bg-teal-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
@@ -108,8 +146,7 @@ export default function CheckOutForm({
 
       <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
         <div className="max-w-5xl w-full">
-
-          {/* header ----------------------------------------------------- */}
+          {/* Header */}
           <div className="flex items-center gap-6 mb-12">
             <button
               onClick={onBack}
@@ -125,12 +162,10 @@ export default function CheckOutForm({
             </div>
           </div>
 
-          {/* ------------------ GRID (left + right) -------------------- */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-
-            {/* ───────── LEFT COLUMN (stats + search) ───────── */}
+            {/* Left Column - Stats & Search */}
             <div className="space-y-8">
-              {/* small dashboard */}
+              {/* Dashboard Stats */}
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-xl flex items-center justify-center">
@@ -157,7 +192,7 @@ export default function CheckOutForm({
                 </div>
               </div>
 
-              {/* search panel */}
+              {/* Search Panel */}
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
                 <div className="flex items-center gap-3 mb-6">
                   <User className="w-6 h-6 text-emerald-400" />
@@ -168,29 +203,65 @@ export default function CheckOutForm({
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
-                      setFoundVisitor(null);
-                      setNotFound(false);
+                      if (!e.target.value.trim()) {
+                        resetSearch();
+                      }
                     }}
                     onKeyDown={handleKeyPress}
                     className="w-full px-6 py-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl focus:ring-2 focus:ring-emerald-500 text-white placeholder-gray-400 text-lg transition-all"
-                    placeholder="Enter name or phone"
+                    placeholder="Enter name, phone, or person they're meeting"
                   />
-                  <button
-                    onClick={handleSearch}
-                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white px-8 py-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-3"
-                  >
-                    <Search className="w-5 h-5" />
-                    Search Visitor
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleSearch}
+                      disabled={!searchTerm.trim()}
+                      className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white px-8 py-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-3"
+                    >
+                      <Search className="w-5 h-5" />
+                      Search Visitor
+                    </button>
+                    {(foundVisitor || notFound) && (
+                      <button
+                        onClick={resetSearch}
+                        className="bg-white/10 backdrop-blur-xl border border-white/20 hover:bg-white/20 text-white px-6 py-4 rounded-xl font-semibold transition-all"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* ───────── RIGHT COLUMN (found card / list) ───────── */}
+            {/* Right Column - Results */}
             <div className="space-y-8">
+              {/* Success Message */}
+              {checkoutSuccess && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-8 text-center">
+                  <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-8 h-8 text-green-400" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-white mb-2">
+                    Check-out Successful!
+                  </h3>
+                  <p className="text-green-300">
+                    Visitor has been successfully checked out.
+                  </p>
+                </div>
+              )}
 
-              {/* VISITOR FOUND CARD */}
-              {foundVisitor && (
+              {/* Error Message */}
+              {checkoutError && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-400" />
+                    <p className="text-red-400">{checkoutError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Visitor Found Card */}
+              {foundVisitor && !checkoutSuccess && (
                 <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-2xl p-8">
                   <div className="flex justify-between mb-6">
                     <div className="flex-1">
@@ -205,21 +276,28 @@ export default function CheckOutForm({
                         {foundVisitor.personToMeet && (
                           <p className="flex items-center gap-3">
                             <Users className="w-4 h-4 text-emerald-400" />
-                            Meeting:&nbsp;{foundVisitor.personToMeet}
+                            Meeting: {foundVisitor.personToMeet}
                           </p>
                         )}
 
                         {foundVisitor.reasonForVisit && (
                           <p className="flex items-center gap-3">
                             <MapPin className="w-4 h-4 text-emerald-400" />
-                            Purpose:&nbsp;{formatPurpose(foundVisitor)}
+                            Purpose: {formatPurpose(foundVisitor)}
                           </p>
                         )}
 
                         <p className="flex items-center gap-3">
                           <Clock className="w-4 h-4 text-emerald-400" />
-                          Duration:&nbsp;{getVisitDuration(foundVisitor.checkInTime)}
+                          Duration: {getVisitDuration(foundVisitor.checkInTime)}
                         </p>
+
+                        {foundVisitor.phoneNumber && (
+                          <p className="flex items-center gap-3">
+                            <User className="w-4 h-4 text-emerald-400" />
+                            Phone: {foundVisitor.phoneNumber}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -235,22 +313,40 @@ export default function CheckOutForm({
                   <button
                     onClick={handleCheckOutClick}
                     disabled={checkingOut}
-                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold py-4 rounded-xl text-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 rounded-xl text-lg transition-all disabled:cursor-not-allowed flex items-center justify-center gap-3"
                   >
-                    {checkingOut ? 'Processing...' : 'Complete Check-Out'}
+                    {checkingOut ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Processing Check-out...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-5 h-5" />
+                        Complete Check-Out
+                      </>
+                    )}
                   </button>
                 </div>
               )}
 
-              {/* ZERO-STATE (no one inside) */}
-              {activeVisitors.length === 0 && (
-                <div className="text-white bg-red-500/20 border border-red-400/30 p-4 rounded-xl">
-                  No active visitors currently inside the building.
+              {/* No Active Visitors */}
+              {activeVisitors.length === 0 && !foundVisitor && !notFound && (
+                <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-8 text-center">
+                  <div className="w-16 h-16 bg-orange-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-8 h-8 text-orange-400" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-white mb-2">
+                    No Active Visitors
+                  </h3>
+                  <p className="text-orange-300">
+                    There are currently no visitors checked in to the building.
+                  </p>
                 </div>
               )}
 
-              {/* ACTIVE VISITOR LIST */}
-              {activeVisitors.length > 0 && !foundVisitor && (
+              {/* Active Visitor List */}
+              {activeVisitors.length > 0 && !foundVisitor && !notFound && (
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
                   <h3 className="text-xl font-semibold text-white mb-6 flex items-center gap-3">
                     <Users className="w-6 h-6 text-emerald-400" />
@@ -266,6 +362,7 @@ export default function CheckOutForm({
                           setSearchTerm(v.fullName);
                           setFoundVisitor(v);
                           setNotFound(false);
+                          setCheckoutError('');
                         }}
                       >
                         <div className="flex items-center gap-4">
@@ -308,7 +405,7 @@ export default function CheckOutForm({
                 </div>
               )}
 
-              {/* NOT-FOUND banner */}
+              {/* Not Found */}
               {notFound && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-8 text-center">
                   <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -317,15 +414,19 @@ export default function CheckOutForm({
                   <h3 className="text-xl font-semibold text-white mb-2">
                     Visitor Not Found
                   </h3>
-                  <p className="text-red-300">
-                    No active visitor matches that search. Please check the spelling
-                    or contact reception.
+                  <p className="text-red-300 mb-4">
+                    No active visitor matches "{searchTerm}". Please check the spelling or try a different search term.
                   </p>
+                  <button
+                    onClick={resetSearch}
+                    className="bg-white/10 backdrop-blur-xl border border-white/20 hover:bg-white/20 text-white px-6 py-3 rounded-xl font-semibold transition-all"
+                  >
+                    Try Again
+                  </button>
                 </div>
               )}
-
-            </div>{/* /RIGHT column */}
-          </div>{/* /GRID */}
+            </div>
+          </div>
         </div>
       </div>
     </div>

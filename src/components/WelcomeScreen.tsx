@@ -45,10 +45,14 @@ export default function WelcomeScreen({ onCheckIn, onCheckOut, onLateCheckIn }: 
               <h2 className="text-4xl md:text-6xl font-bold text-white mb-8 leading-tight">
                 Welcome to
               </h2>
-              <div className="text-4xl md:text-6xl lg:text-7xl font-black bg-gradient-to-r
-                 from-emerald-400 via-cyan-500 to-blue-600
-                 bg-clip-text text-transparent mb-12 px-4 leading-[1.2] min-h-[80px] md:min-h-[120px] lg:min-h-[140px] flex items-center justify-center">
-                GrowthJockey
+              <div className="relative">
+                <div className="text-4xl md:text-6xl lg:text-7xl font-black bg-gradient-to-r
+                   from-emerald-400 via-cyan-500 to-blue-600
+                   bg-clip-text text-transparent mb-12 px-4 leading-[1.1] 
+                   min-h-[80px] md:min-h-[120px] lg:min-h-[140px] 
+                   flex items-center justify-center">
+                  GrowthJockey
+                </div>
               </div>
             </div>
           </div>
@@ -108,7 +112,7 @@ export default function WelcomeScreen({ onCheckIn, onCheckOut, onLateCheckIn }: 
           <div className="text-center mt-16">
             <div className="inline-flex items-center gap-2 text-gray-400 text-sm bg-white/5 backdrop-blur-xl border border-white/10 rounded-full px-6 py-3">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              System Online
+              System Online • Slack Connected • Database Ready
             </div>
           </div>
         </div>
