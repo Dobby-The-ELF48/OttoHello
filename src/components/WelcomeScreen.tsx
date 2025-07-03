@@ -42,12 +42,12 @@ export default function WelcomeScreen({ onCheckIn, onCheckOut, onLateCheckIn }: 
 
             {/* Welcome Message */}
             <div className="mb-12 text-center">
-              <h2 className="text-5xl md:text-7xl font-bold text-white mb-6 leading-tight">
+              <h2 className="text-4xl md:text-6xl font-bold text-white mb-8 leading-tight">
                 Welcome to
               </h2>
-              <div className="text-5xl md:text-7xl font-black bg-gradient-to-r
+              <div className="text-4xl md:text-6xl lg:text-7xl font-black bg-gradient-to-r
                  from-emerald-400 via-cyan-500 to-blue-600
-                 bg-clip-text text-transparent mb-8 px-4 leading-tight">
+                 bg-clip-text text-transparent mb-12 px-4 leading-[1.2] min-h-[80px] md:min-h-[120px] lg:min-h-[140px] flex items-center justify-center">
                 GrowthJockey
               </div>
             </div>
